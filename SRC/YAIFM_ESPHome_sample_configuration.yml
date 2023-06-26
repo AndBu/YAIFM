@@ -1,0 +1,185 @@
+#Copyright (c) 2024 AndBu and others
+#
+#Permission is hereby granted, free of charge, to any person obtaining
+#a copy of this software and associated documentation files (the
+#"Software"), to deal in the Software without restriction, including
+#without limitation the rights to use, copy, modify, merge, publish,
+#distribute, sublicense, and/or sell copies of the Software, and to
+#permit persons to whom the Software is furnished to do so, subject to
+#the following conditions:
+#
+#The above copyright notice and this permission notice shall be
+#included in all copies or substantial portions of the Software.
+#
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+#EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+#NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+#LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+#OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+#WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+#This is a proof-of-concept automation templat for the YAIFM
+#"Yet another IKEA Fridans Motoriozation Project"
+#
+#The source can be found on GitHub:https://github.com/AndBu/YAIFM
+#
+#This script requires the end stop switch, if you don't want to use the
+#end stop switch, write your own script and share it please ;)
+
+esphome:
+  name: <your_device_name>
+  friendly_name: <your_friendly_name>
+  on_boot:
+    priority: 600
+    # This ensures that the blind has to be pulled up again and hit the limit switch before it can operate
+    then:
+      - cover.template.publish:
+          id: screen
+          state: CLOSED
+          current_operation: IDLE
+      - sensor.rotary_encoder.set_value:
+          id: re_mot
+          value: 0      
+esp8266:
+  board: d1_mini
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: <your_device_key>
+
+ota:
+  password: <your_password_name>
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: <your_hotspot_fallback_ssid>
+    password: <your_hotspot_fallback_password>
+
+# Disable logging via serial since we are using the pins of the serial port
+logger:
+  baud_rate: 0
+
+# Configure the pins for PWM
+output:
+  # Blinds (+) and (-) leads for motor
+  - platform: esp8266_pwm
+    id: mot_m1
+    pin: GPIO14 #D6 on te WeMos D1 MINI  
+  - platform: esp8266_pwm
+    id: mot_m2
+    pin: GPIO12 #D5 on te WeMos D1 MINI
+
+
+binary_sensor:
+  # End stop
+  - platform: gpio
+    id: sw_mot
+    name: "End Stop"
+    internal: True
+    pin:
+      number: 13 #D7 on te WeMos D1 MINI
+      inverted: true
+      # The end stop  switch is naturally closed.
+      # If there is an open circuit (i.e. broken connection),
+      # we want that to be detected, hence the pullup)
+      mode:
+        input: true
+        pullup: true
+
+sensor:
+- platform: rotary_encoder
+  name: "Motor encoder"
+  internal: False
+  id: re_mot
+  pin_b: GPIO4  #D2 on te WeMos D1 MINI
+  pin_a: GPIO5  #D1 on te WeMos D1 MINI
+
+fan:
+  # Motor controller
+  - platform: hbridge
+    id: mot
+    name: "Motor"
+    internal: True
+    pin_a: mot_m1
+    pin_b: mot_m2
+    decay_mode: slow
+
+cover:
+  #Screen A
+  - platform: template
+    device_class: blind
+    name: 'Screen'
+    id: screen
+    close_action:
+       then:
+        - logger.log: 'Rolling down screen...'
+        - cover.template.publish:
+            id: screen
+            current_operation: CLOSING          
+        - fan.turn_on:
+            id: mot
+            direction: reverse
+        - wait_until:
+            condition:
+              lambda: return (id(re_mot).state) >= 35000; #Magic number for ~1.80m extension, replace with how far your blind should extend.
+        - fan.turn_off: mot
+        - fan.hbridge.brake: mot                              
+        - cover.template.publish:
+            id: screen
+            state: CLOSED
+            current_operation: IDLE
+        - logger.log: '...screen rolled down'
+    open_action:
+      then:
+        - logger.log: 'Rolling up screen...'
+        - cover.template.publish:
+            id: screen
+            current_operation: OPENING           
+        - fan.turn_on:
+           id: mot
+           direction: forward
+        - wait_until:
+            binary_sensor.is_on: sw_mot
+        - fan.turn_off: mot  
+        - fan.hbridge.brake: mot
+        - delay: 100 ms          
+        - fan.turn_on:
+           id: mot
+           direction: reverse
+        - delay: 0.2 sec
+        - fan.turn_off: mot
+        - fan.hbridge.brake: mot
+        - delay: 0.1 sec
+        - sensor.rotary_encoder.set_value:
+            id: re_mot
+            value: 0                        
+        - cover.template.publish:
+            id: screen
+            state: OPEN
+            current_operation: IDLE
+        - logger.log: '... screen rolled up.'
+    stop_action:
+      then:
+        - logger.log: 'Stopping screen...'
+        - fan.turn_off: mot
+        - fan.hbridge.brake: mot         
+        - if: # Check if we are currently moving
+            condition:
+              - lambda: 'return id(screen).position == COVER_OPEN && id(screen).current_operation == COVER_OPERATION_IDLE || 1;'
+            then:
+              - cover.template.publish:
+                  id: screen
+                  state: OPEN
+                  current_operation: IDLE
+            else:
+              - cover.template.publish:
+                  id: screen
+                  state: CLOSED
+                  current_operation: IDLE
+        - logger.log: '... screen stopped.'
