@@ -114,44 +114,46 @@ globals:
   - id: min_value
     type: int
     restore_value: yes
-    initial_value: '3000'
+    initial_value: '2300'
   - id: max_value
     type: int
     restore_value: yes
-    initial_value: '35000'
+    initial_value: '23000'
 
 number:
   - platform: template
-    name: 'Screen Minimum Value'
-    id: screen_min_value
-    optimistic: true
-    initial_value: 3000
+    name: "Blind Minimum Value"
+    id: blind_min_value
+    optimistic: True
+    restore_value: True
+    initial_value: 2300
     min_value: 0
     max_value: 50000
     step: 100
     set_action:
       - lambda: |-
-          ESP_LOGI('set_min_value', 'Setting min_value to %d', (int)x);
+          ESP_LOGI("set_min_value", "Setting min_value to %d", (int)x);
           id(min_value) = (int)x;
 
   - platform: template
-    name: 'Screen Maximum Value'
-    id: screen_max_value
+    name: "Blind Maximum Value"
+    id: blind_max_value
     optimistic: true
-    initial_value: 35000
+    restore_value: True
+    initial_value: 23000
     min_value: 0
     max_value: 50000
     step: 100
     set_action:
       - lambda: |-
-          ESP_LOGI('set_max_value', 'Setting max_value to %d', (int)x);
+          ESP_LOGI("set_max_value", "Setting max_value to %d", (int)x);
           id(max_value) = (int)x;
 
 cover:
   - platform: template
     device_class: blind
-    name: 'Screen'
-    id: screen
+    name: "Blind"
+    id: blind
     has_position: true
     lambda: |-
       // Calculate the percentage closed (reversed logic)
@@ -165,21 +167,21 @@ cover:
       - lambda: |-
           int current_position = id(re_mot).state;
           int target_value = id(max_value) - (pos * (id(max_value) - id(min_value))); // Use 'x' for position
-          id(screen).current_operation = COVER_OPERATION_IDLE;
+          id(blind).current_operation = COVER_OPERATION_IDLE;
 
           if (current_position < target_value) {
-            ESP_LOGI('position_action', 'Current position is less than target. Moving to CLOSE.');
-            id(screen).current_operation = COVER_OPERATION_CLOSING;
+            ESP_LOGI("position_action", "Current position is less than target. Moving to CLOSE.");
+            id(blind).current_operation = COVER_OPERATION_CLOSING;
           } else if (current_position > target_value) {
-            ESP_LOGI('position_action', 'Current position is greater than target. Moving to OPEN.');
-            id(screen).current_operation = COVER_OPERATION_OPENING;
+            ESP_LOGI("position_action", "Current position is greater than target. Moving to OPEN.");
+            id(blind).current_operation = COVER_OPERATION_OPENING;
           } else {
-            ESP_LOGI('position_action', 'Position already correct.');
+            ESP_LOGI("position_action", "Position already correct.");
           }
 
       - if:
           condition:
-            lambda: 'return id(screen).current_operation == COVER_OPERATION_CLOSING;'
+            lambda: "return id(blind).current_operation == COVER_OPERATION_CLOSING;"
           then:
             - fan.turn_on:
                 id: mot
@@ -193,7 +195,7 @@ cover:
 
       - if:
           condition:
-            lambda: 'return id(screen).current_operation == COVER_OPERATION_OPENING;'
+            lambda: "return id(blind).current_operation == COVER_OPERATION_OPENING;"
           then:
             - fan.turn_on:
                 id: mot
@@ -206,13 +208,13 @@ cover:
             - fan.hbridge.brake: mot
 
       - lambda: |-
-          id(screen).current_operation = COVER_OPERATION_IDLE;
-      - logger.log: 'Screen position adjusted successfully.'
+          id(blind).current_operation = COVER_OPERATION_IDLE;
+      - logger.log: "Blind position adjusted successfully."
     close_action:
       then:
-        - logger.log: 'Rolling down screen...'
+        - logger.log: "Rolling down blind..."
         - cover.template.publish:
-            id: screen
+            id: blind
             current_operation: CLOSING
         - fan.turn_on:
             id: mot
@@ -223,15 +225,15 @@ cover:
         - fan.turn_off: mot
         - fan.hbridge.brake: mot
         - cover.template.publish:
-            id: screen
+            id: blind
             state: CLOSED
             current_operation: IDLE
-        - logger.log: '...screen rolled down'
+        - logger.log: "...blind rolled down"
     open_action:
       then:
-        - logger.log: 'Rolling up screen...'
+        - logger.log: "Rolling up blind..."
         - cover.template.publish:
-            id: screen
+            id: blind
             current_operation: OPENING
         - fan.turn_on:
             id: mot
@@ -243,38 +245,38 @@ cover:
         - fan.hbridge.brake: mot
         - delay: 100 ms
         - cover.template.publish:
-            id: screen
+            id: blind
             state: OPEN
             current_operation: IDLE
-        - logger.log: '... screen rolled up.'
+        - logger.log: "... blind rolled up."
     stop_action:
       then:
-        - logger.log: 'Stopping screen...'
+        - logger.log: "Stopping blind..."
         - fan.turn_off: mot
         - fan.hbridge.brake: mot
         - if: # Check if we are currently moving
             condition:
-              - lambda: 'return (id(screen).position == COVER_OPEN && id(screen).current_operation == COVER_OPERATION_IDLE) || 1;'
+              - lambda: "return (id(blind).position == COVER_OPEN && id(blind).current_operation == COVER_OPERATION_IDLE) || 1;"
             then:
               - cover.template.publish:
-                  id: screen
+                  id: blind
                   state: OPEN
                   current_operation: IDLE
             else:
               - cover.template.publish:
-                  id: screen
+                  id: blind
                   state: CLOSED
                   current_operation: IDLE
-        - logger.log: '... screen stopped.'
+        - logger.log: "... blind stopped."
 
 button:
   - platform: template
     name: Initialize
-    id: initialize_screen
+    id: initialize_blind
     on_press:
-      - logger.log: 'Rolling up screen on init...'
+      - logger.log: 'Rolling up blind on init...'
       - cover.template.publish:
-          id: screen
+          id: blind
           current_operation: OPENING           
       - fan.turn_on:
           id: mot
@@ -295,7 +297,7 @@ button:
           id: re_mot
           value: 0                        
       - cover.template.publish:
-          id: screen
+          id: blind
           state: OPEN
           current_operation: IDLE
-      - logger.log: '... screen rolled up.'
+      - logger.log: '... blind rolled up.'
