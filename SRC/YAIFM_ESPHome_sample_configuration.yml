@@ -122,8 +122,8 @@ globals:
 
 number:
   - platform: template
-    name: "Blind Minimum Value"
-    id: blind_min_value
+    name: "Screen Minimum Value"
+    id: screen_min_value
     optimistic: True
     restore_value: True
     initial_value: 2300
@@ -136,8 +136,8 @@ number:
           id(min_value) = (int)x;
 
   - platform: template
-    name: "Blind Maximum Value"
-    id: blind_max_value
+    name: "Screen Maximum Value"
+    id: screen_max_value
     optimistic: true
     restore_value: True
     initial_value: 23000
@@ -153,7 +153,7 @@ cover:
   - platform: template
     device_class: blind
     name: "Blind"
-    id: blind
+    id: screen
     has_position: true
     lambda: |-
       // Calculate the percentage closed (reversed logic)
@@ -167,21 +167,21 @@ cover:
       - lambda: |-
           int current_position = id(re_mot).state;
           int target_value = id(max_value) - (pos * (id(max_value) - id(min_value))); // Use 'x' for position
-          id(blind).current_operation = COVER_OPERATION_IDLE;
+          id(screen).current_operation = COVER_OPERATION_IDLE;
 
           if (current_position < target_value) {
             ESP_LOGI("position_action", "Current position is less than target. Moving to CLOSE.");
-            id(blind).current_operation = COVER_OPERATION_CLOSING;
+            id(screen).current_operation = COVER_OPERATION_CLOSING;
           } else if (current_position > target_value) {
             ESP_LOGI("position_action", "Current position is greater than target. Moving to OPEN.");
-            id(blind).current_operation = COVER_OPERATION_OPENING;
+            id(screen).current_operation = COVER_OPERATION_OPENING;
           } else {
             ESP_LOGI("position_action", "Position already correct.");
           }
 
       - if:
           condition:
-            lambda: "return id(blind).current_operation == COVER_OPERATION_CLOSING;"
+            lambda: "return id(screen).current_operation == COVER_OPERATION_CLOSING;"
           then:
             - fan.turn_on:
                 id: mot
@@ -195,7 +195,7 @@ cover:
 
       - if:
           condition:
-            lambda: "return id(blind).current_operation == COVER_OPERATION_OPENING;"
+            lambda: "return id(screen).current_operation == COVER_OPERATION_OPENING;"
           then:
             - fan.turn_on:
                 id: mot
@@ -208,13 +208,13 @@ cover:
             - fan.hbridge.brake: mot
 
       - lambda: |-
-          id(blind).current_operation = COVER_OPERATION_IDLE;
+          id(screen).current_operation = COVER_OPERATION_IDLE;
       - logger.log: "Blind position adjusted successfully."
     close_action:
       then:
         - logger.log: "Rolling down blind..."
         - cover.template.publish:
-            id: blind
+            id: screen
             current_operation: CLOSING
         - fan.turn_on:
             id: mot
@@ -225,7 +225,7 @@ cover:
         - fan.turn_off: mot
         - fan.hbridge.brake: mot
         - cover.template.publish:
-            id: blind
+            id: screen
             state: CLOSED
             current_operation: IDLE
         - logger.log: "...blind rolled down"
@@ -233,7 +233,7 @@ cover:
       then:
         - logger.log: "Rolling up blind..."
         - cover.template.publish:
-            id: blind
+            id: screen
             current_operation: OPENING
         - fan.turn_on:
             id: mot
@@ -245,7 +245,7 @@ cover:
         - fan.hbridge.brake: mot
         - delay: 100 ms
         - cover.template.publish:
-            id: blind
+            id: screen
             state: OPEN
             current_operation: IDLE
         - logger.log: "... blind rolled up."
@@ -256,15 +256,15 @@ cover:
         - fan.hbridge.brake: mot
         - if: # Check if we are currently moving
             condition:
-              - lambda: "return (id(blind).position == COVER_OPEN && id(blind).current_operation == COVER_OPERATION_IDLE) || 1;"
+              - lambda: "return (id(screen).position == COVER_OPEN && id(screen).current_operation == COVER_OPERATION_IDLE) || 1;"
             then:
               - cover.template.publish:
-                  id: blind
+                  id: screen
                   state: OPEN
                   current_operation: IDLE
             else:
               - cover.template.publish:
-                  id: blind
+                  id: screen
                   state: CLOSED
                   current_operation: IDLE
         - logger.log: "... blind stopped."
@@ -276,7 +276,7 @@ button:
     on_press:
       - logger.log: 'Rolling up blind on init...'
       - cover.template.publish:
-          id: blind
+          id: screen
           current_operation: OPENING           
       - fan.turn_on:
           id: mot
@@ -297,7 +297,7 @@ button:
           id: re_mot
           value: 0                        
       - cover.template.publish:
-          id: blind
+          id: screen
           state: OPEN
           current_operation: IDLE
       - logger.log: '... blind rolled up.'
