@@ -127,13 +127,13 @@ If you are already familiar with ESPHome and just need a refresher, the steps in
 
 ## Integrate into home assistant
 
-Once you have integrated the device into ESPHome, it is time to configure it. [This sample configruation](https://github.com/AndBu/YAIFM/blob/main/SRC/YAIFM_ESPHome_sample_configuration.yml) is a proof of concept and comes without any warranty.
+Once you have integrated the device into ESPHome, it is time to configure it. [This sample configuration](/SRC/YAIFM_ESPHome_sample_configuration.yml) is a proof of concept and comes without any warranty.
 
 **As of now, the code will not run if you do not use the end stop switch as it expects a naturally-closed connection of the switch. After every reboot of the WeMos D1 mini, the blind has to be initialized by rolling it all the way to the end first.**
 
 ## Custom PCB
 
-You can find a custom PCB in the [PCB folder](PCB/). **The PCB has a different pinout compared to the protoboard.**
+You can find a custom PCB in the [PCB folder](PCB/). A description can be found [here](PCB/YADCMCB.md). **The PCB has a different pinout compared to the protoboard.**
 
 
 # Limitations and constraints

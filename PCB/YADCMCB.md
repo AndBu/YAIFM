@@ -1,12 +1,16 @@
 # Yet Another DC Motor Control Board (YADCMCB) [v0.9]
 
-This PCB can be used for controlling the motor of Yet Another IKEA Fridans Motorization (YAIFM). The design goal of the PCB was to make assemble quick and easy from readily available PCB modules such as the DRV8833 DC motor controller (or the DC MX1508 motor controller), the Wemos D1 Mini ESP8255 board (or the Wemos S2 Mini ESP32 board).
+This PCB can be used for controlling the motor of Yet Another IKEA Fridans Motorization (YAIFM). The design goal of the PCB was to make assembly quick and easy, using readily available PCB modules such as the DRV8833 DC motor controller (or the DC MX1508 motor controller) and the Wemos D1 Mini ESP8266 board (or the Wemos S2 Mini ESP32 board).
 
 **The board is currently in testing. Not all functions are tested.**
 
 **THE PINOUT OF THE BOARD IS DIFFERENT FROM THE PINOUT OF THE PROTOBOARD FOR THE YAIFM Project**
 
 A typical motor to control with this board is the [GA12-N20 geared DC/DC motor](https://www.aliexpress.com/item/4001045242610.html).
+
+## Motor controllers
+
+The board is designed to fit either a [DRV8833](https://aliexpress.com/item/4000083406292.html)  DC motor controller or an [MX1503](https://www.aliexpress.com/item/1005006750110807.html) DC motor controller. However, the board only makes use of one of their channels and obviously, only one board can be fitted at once.
 
 ## Pinout
 
