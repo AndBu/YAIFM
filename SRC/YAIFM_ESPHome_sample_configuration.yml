@@ -19,10 +19,15 @@
 #OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 #WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#This is a proof-of-concept automation templat for the YAIFM
+#This is a proof-of-concept automation template for the YAIFM
 #"Yet another IKEA Fridans Motoriozation Project"
 #
 #The source can be found on GitHub:https://github.com/AndBu/YAIFM
+#
+#This script assumes you have a Wemos D1 Mini ESP8266 board. If you
+#have another board, change the board type and pin assigment. On an 
+#ESP32 board, it is recommended to switch to the hardware PWM as 
+#described here: https://esphome.io/components/output/ledc
 #
 #This script requires the end stop switch, if you don't want to use the
 #end stop switch, write your own script and share it please ;)
@@ -32,7 +37,7 @@ esphome:
   friendly_name: <your_friendly_name>
   on_boot:
     priority: 600
-    # This ensures that the blind has to be pulled up again and hit the limit switch before it can operate
+    # This ensures that the blind has to be pulled up and hit the limit switch on the first boot
     then:
       - cover.template.publish:
           id: screen
@@ -42,7 +47,7 @@ esphome:
           id: re_mot
           value: 0      
 esp8266:
-  board: d1_mini
+  board: d1_mini 
 
 # Enable Home Assistant API
 api:
@@ -99,6 +104,11 @@ sensor:
   id: re_mot
   pin_b: GPIO4  #D2 on te WeMos D1 MINI
   pin_a: GPIO5  #D1 on te WeMos D1 MINI
+- platform: template
+  name: "Initialized"
+  lambda: |-
+    return id(init_done);
+  update_interval: 0.1s
 
 fan:
   # Motor controller
@@ -110,76 +120,212 @@ fan:
     pin_b: mot_m2
     decay_mode: slow
 
+globals:
+  - id: init_done
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: min_value
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: max_value
+    type: int
+    restore_value: yes
+    initial_value: '23000'
+
+number:
+  - platform: template
+    name: "Screen Minimum Value"
+    id: screen_min_value
+    optimistic: True
+    restore_value: True
+    initial_value: 0
+    min_value: 0
+    max_value: 50000
+    step: 100
+    set_action:
+      - lambda: |-
+          ESP_LOGI("set_min_value", "Setting min_value to %d", (int)x);
+          id(min_value) = (int)x;
+
+  - platform: template
+    name: "Screen Maximum Value"
+    id: screen_max_value
+    optimistic: true
+    restore_value: True
+    initial_value: 23000
+    min_value: 0
+    max_value: 50000
+    step: 100
+    set_action:
+      - lambda: |-
+          ESP_LOGI("set_max_value", "Setting max_value to %d", (int)x);
+          id(max_value) = (int)x;
+
 cover:
-  #Screen A
   - platform: template
     device_class: blind
-    name: 'Screen'
+    name: "Blind"
     id: screen
+    has_position: true
+    lambda: |-
+      // Calculate the percentage closed (reversed logic)
+      float current_position = id(re_mot).state;
+      // Clamp the value between min and max
+      if (current_position < id(min_value)) current_position = id(min_value);
+      if (current_position > id(max_value)) current_position = id(max_value);
+      // Return the percentage closed
+      return (id(max_value) - current_position) / (id(max_value) - id(min_value));
+    position_action:
+      - lambda: |-
+          int current_position = id(re_mot).state;
+          int target_value = id(max_value) - (pos * (id(max_value) - id(min_value))); // Use 'x' for position
+          id(screen).current_operation = COVER_OPERATION_IDLE;
+
+          if (current_position < target_value) {
+            ESP_LOGI("position_action", "Current position is less than target. Moving to CLOSE.");
+            id(screen).current_operation = COVER_OPERATION_CLOSING;
+          } else if (current_position > target_value) {
+            ESP_LOGI("position_action", "Current position is greater than target. Moving to OPEN.");
+            id(screen).current_operation = COVER_OPERATION_OPENING;
+          } else {
+            ESP_LOGI("position_action", "Position already correct.");
+          }
+
+      - if:
+          condition:
+            lambda: "return id(screen).current_operation == COVER_OPERATION_CLOSING && id(init_done);"
+          then:
+            - fan.turn_on:
+                id: mot
+                direction: reverse
+            - wait_until:
+                lambda: |-
+                  int target_value = id(max_value) - (pos * (id(max_value) - id(min_value))); // Recalculate target_value
+                  return id(re_mot).state >= target_value;
+            - fan.turn_off: mot
+            - fan.hbridge.brake: mot
+
+      - if:
+          condition:
+            lambda: "return id(screen).current_operation == COVER_OPERATION_OPENING && id(init_done);"
+          then:
+            - fan.turn_on:
+                id: mot
+                direction: forward
+            - wait_until:
+                lambda: |-
+                  int target_value = id(max_value) - (pos * (id(max_value) - id(min_value))); // Recalculate target_value
+                  return id(re_mot).state <= target_value;
+            - fan.turn_off: mot
+            - fan.hbridge.brake: mot
+
+      - lambda: |-
+          id(screen).current_operation = COVER_OPERATION_IDLE;
+      - logger.log: "Blind position adjusted successfully."
     close_action:
-       then:
-        - logger.log: 'Rolling down screen...'
-        - cover.template.publish:
-            id: screen
-            current_operation: CLOSING          
-        - fan.turn_on:
-            id: mot
-            direction: reverse
-        - wait_until:
-            condition:
-              lambda: return (id(re_mot).state) >= 35000; #Magic number for ~1.80m extension, replace with how far your blind should extend.
-        - fan.turn_off: mot
-        - fan.hbridge.brake: mot                              
-        - cover.template.publish:
-            id: screen
-            state: CLOSED
-            current_operation: IDLE
-        - logger.log: '...screen rolled down'
+      - if:
+          condition:
+            lambda: "return id(init_done);"
+          then:
+          - logger.log: "Rolling down blind..."
+          - cover.template.publish:
+              id: screen
+              current_operation: CLOSING
+          - fan.turn_on:
+              id: mot
+              direction: reverse
+          - wait_until:
+              condition:
+                lambda: return (id(re_mot).state) >= id(max_value);
+          - fan.turn_off: mot
+          - fan.hbridge.brake: mot
+          - cover.template.publish:
+              id: screen
+              state: CLOSED
+              current_operation: IDLE
+          - logger.log: "...blind rolled down"
+          else:
+          - logger.log: "Cannot roll down blinds; not initialized."            
     open_action:
-      then:
-        - logger.log: 'Rolling up screen...'
-        - cover.template.publish:
-            id: screen
-            current_operation: OPENING           
-        - fan.turn_on:
-           id: mot
-           direction: forward
-        - wait_until:
-            binary_sensor.is_on: sw_mot
-        - fan.turn_off: mot  
-        - fan.hbridge.brake: mot
-        - delay: 100 ms          
-        - fan.turn_on:
-           id: mot
-           direction: reverse
-        - delay: 0.2 sec
-        - fan.turn_off: mot
-        - fan.hbridge.brake: mot
-        - delay: 0.1 sec
-        - sensor.rotary_encoder.set_value:
-            id: re_mot
-            value: 0                        
-        - cover.template.publish:
-            id: screen
-            state: OPEN
-            current_operation: IDLE
-        - logger.log: '... screen rolled up.'
+      - if:
+          condition:
+            lambda: "return id(init_done);"
+          then:      
+          - logger.log: "Rolling up blind..."
+          - cover.template.publish:
+              id: screen
+              current_operation: OPENING
+          - fan.turn_on:
+              id: mot
+              direction: forward
+          - wait_until:
+              condition:
+                lambda: return (id(re_mot).state) <= id(min_value);
+          - fan.turn_off: mot
+          - fan.hbridge.brake: mot
+          - delay: 100 ms
+          - cover.template.publish:
+              id: screen
+              state: OPEN
+              current_operation: IDLE
+          - logger.log: "... blind rolled up."
+          else:
+          - logger.log: "Cannot roll up blinds; not initialized."                
     stop_action:
-      then:
-        - logger.log: 'Stopping screen...'
-        - fan.turn_off: mot
-        - fan.hbridge.brake: mot         
-        - if: # Check if we are currently moving
-            condition:
-              - lambda: 'return id(screen).position == COVER_OPEN && id(screen).current_operation == COVER_OPERATION_IDLE || 1;'
-            then:
-              - cover.template.publish:
-                  id: screen
-                  state: OPEN
-                  current_operation: IDLE
-            else:
-              - cover.template.publish:
-                  id: screen
-                  state: CLOSED
-                  current_operation: IDLE
-        - logger.log: '... screen stopped.'
+      - logger.log: "Stopping blind..."
+      - fan.turn_off: mot
+      - fan.hbridge.brake: mot
+      - if: # Check if we are currently moving
+          condition:
+            - lambda: "return (id(screen).position == COVER_OPEN && id(screen).current_operation == COVER_OPERATION_IDLE) || 1;"
+          then:
+            - cover.template.publish:
+                id: screen
+                state: OPEN
+                current_operation: IDLE
+          else:
+            - cover.template.publish:
+                id: screen
+                state: CLOSED
+                current_operation: IDLE
+      - logger.log: "... blind stopped."
+button:
+  - platform: template
+    name: Initialize
+    id: initialize_blind
+    on_press:
+      - logger.log: 'Rolling up blind on init...'
+      - globals.set:
+          id: init_done
+          value: 'false'     
+      - cover.template.publish:
+          id: screen
+          current_operation: OPENING           
+      - fan.turn_on:
+          id: mot
+          direction: forward
+      - wait_until:
+          binary_sensor.is_on: sw_mot
+      - fan.turn_off: mot  
+      - fan.hbridge.brake: mot
+      - delay: 100 ms          
+      - fan.turn_on:
+          id: mot
+          direction: reverse
+      - delay: 0.2 sec
+      - fan.turn_off: mot
+      - fan.hbridge.brake: mot
+      - delay: 0.3 sec
+      - sensor.rotary_encoder.set_value:
+          id: re_mot
+          value: 0                        
+      - cover.template.publish:
+          id: screen
+          state: OPEN
+          current_operation: IDLE
+      - globals.set:
+          id: init_done
+          value: 'true'          
+      - logger.log: '... blind initialized successfully.'
